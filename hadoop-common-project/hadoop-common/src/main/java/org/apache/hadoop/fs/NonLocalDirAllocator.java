@@ -506,7 +506,6 @@ public class NonLocalDirAllocator {
       Context ctx = confChanged(conf); // JTA
 
       // find an appropriate directory
-      LOG.warn("!!!!!!!!!! pathStr = " + pathStr + " !!!!!!!!!!");
       Path path = getLocalPathForWrite(pathStr, size, conf, true);
       File dir = new File(path.getParent().toUri().getPath());
       String prefix = path.getName();
