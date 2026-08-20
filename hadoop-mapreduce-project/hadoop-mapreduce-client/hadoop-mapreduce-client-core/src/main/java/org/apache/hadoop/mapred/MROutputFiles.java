@@ -57,7 +57,7 @@ public class MROutputFiles extends MapOutputFile {
   @Override
   public Path getOutputFile()
       throws IOException {
-    return distDirAlloc.getLocalPathToRead(MRJobConfig.OUTPUT + Path.SEPARATOR
+    return distDirAlloc.getPathToRead(MRJobConfig.OUTPUT + Path.SEPARATOR
         + MAP_OUTPUT_FILENAME_STRING, getConf()); // JTA
   }
 
