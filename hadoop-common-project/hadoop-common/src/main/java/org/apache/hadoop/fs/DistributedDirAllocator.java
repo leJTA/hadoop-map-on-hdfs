@@ -23,7 +23,7 @@ import static org.apache.hadoop.net.NetUtils.getHostname;
 
 @InterfaceAudience.LimitedPrivate({"HDFS", "MapReduce"})
 @InterfaceStability.Unstable
-public class NonLocalDirAllocator {
+public class DistributedDirAllocator {
 
   static final String E_NO_SPACE_AVAILABLE =
       "No space available in any of the local directories";
@@ -42,7 +42,7 @@ public class NonLocalDirAllocator {
    * Create an allocator object.
    * @param contextCfgItemName contextCfgItemName.
    */
-  public NonLocalDirAllocator(String contextCfgItemName) {
+  public DistributedDirAllocator(String contextCfgItemName) {
     this.contextCfgItemName = contextCfgItemName;
   }
 
@@ -74,9 +74,9 @@ public class NonLocalDirAllocator {
    *  @return the complete path to the file on a local disk
    *  @throws IOException raised on errors performing I/O.
    */
-  public Path getLocalPathForWrite(String pathStr,
+  public Path getPathForWrite(String pathStr,
       Configuration conf) throws IOException {
-    return getLocalPathForWrite(pathStr, SIZE_UNKNOWN, conf);
+    return getPathForWrite(pathStr, SIZE_UNKNOWN, conf);
   }
 
   /** Get a path from the local FS. Pass size as
@@ -90,9 +90,9 @@ public class NonLocalDirAllocator {
    *  @return the complete path to the file on a local disk
    *  @throws IOException raised on errors performing I/O.
    */
-  public Path getLocalPathForWrite(String pathStr, long size,
+  public Path getPathForWrite(String pathStr, long size,
       Configuration conf) throws IOException {
-    return getLocalPathForWrite(pathStr, size, conf, true);
+    return getPathForWrite(pathStr, size, conf, true);
   }
 
   /** Get a path from the local FS. Pass size as
@@ -107,11 +107,11 @@ public class NonLocalDirAllocator {
    *  @return the complete path to the file on a local disk
    *  @throws IOException raised on errors performing I/O.
    */
-  public Path getLocalPathForWrite(String pathStr, long size,
+  public Path getPathForWrite(String pathStr, long size,
                                    Configuration conf,
                                    boolean checkWrite) throws IOException {
     AllocatorPerContext context = obtainContext(contextCfgItemName);
-    return context.getLocalPathForWrite(pathStr, size, conf, checkWrite);
+    return context.getPathForWrite(pathStr, size, conf, checkWrite);
   }
 
   /** Get a path from the local FS for reading. We search through all the
@@ -122,10 +122,10 @@ public class NonLocalDirAllocator {
    *  @return the complete path to the file on a local disk
    *  @throws IOException raised on errors performing I/O.
    */
-  public Path getLocalPathToRead(String pathStr,
+  public Path getPathToRead(String pathStr,
       Configuration conf) throws IOException {
     AllocatorPerContext context = obtainContext(contextCfgItemName);
-    return context.getLocalPathToRead(pathStr, conf);
+    return context.getPathToRead(pathStr, conf);
   }
 
   /**
@@ -223,21 +223,21 @@ public class NonLocalDirAllocator {
       private AtomicInteger dirNumLastAccessed = new AtomicInteger(0);
       private FileSystem defaultFS;
       // private DF[] dirDF;
-      private Path[] localDirs;
-      private String savedLocalDirs;
+      private Path[] dirs;
+      private String savedDirs;
 
       public int getAndIncrDirNumLastAccessed() {
         return getAndIncrDirNumLastAccessed(1);
       }
 
       public int getAndIncrDirNumLastAccessed(int delta) {
-        if (localDirs.length < 2 || delta == 0) {
+        if (dirs.length < 2 || delta == 0) {
           return dirNumLastAccessed.get();
         }
         int oldval, newval;
         do {
           oldval = dirNumLastAccessed.get();
-          newval = (oldval + delta) % localDirs.length;
+          newval = (oldval + delta) % dirs.length;
         } while (!dirNumLastAccessed.compareAndSet(oldval, newval));
         return oldval;
       }
@@ -249,18 +249,18 @@ public class NonLocalDirAllocator {
     }
 
     /** This method gets called everytime before any read/write to make sure
-     * that any change to localDirs is reflected immediately.
+     * that any change to dirs is reflected immediately.
      */
     private Context confChanged(Configuration conf)
         throws IOException {
       Context ctx = currentContext.get();
-      String newLocalDirs = conf.get(contextCfgItemName);
-      if (null == newLocalDirs) {
+      String newDirs = conf.get(contextCfgItemName);
+      if (null == newDirs) {
         throw new IOException(contextCfgItemName + " not configured");
       }
-      if (!newLocalDirs.equals(ctx.savedLocalDirs)) {
+      if (!newDirs.equals(ctx.savedDirs)) {
         ctx = new Context();
-        String[] dirStrings = StringUtils.getTrimmedStrings(newLocalDirs);
+        String[] dirStrings = StringUtils.getTrimmedStrings(newDirs);
         ctx.defaultFS = FileSystem.get(conf);
         int numDirs = dirStrings.length;
         ArrayList<Path> dirs = new ArrayList<Path>(numDirs);
@@ -280,9 +280,9 @@ public class NonLocalDirAllocator {
                 ie.getMessage() + "\n", ie);
           } //ignore
         }
-        ctx.localDirs = dirs.toArray(new Path[dirs.size()]);
+        ctx.dirs = dirs.toArray(new Path[dirs.size()]);
         // ctx.dirDF = dfList.toArray(new DF[dirs.size()]);
-        ctx.savedLocalDirs = newLocalDirs;
+        ctx.savedDirs = newDirs;
 
         if (dirs.size() > 0) {
           // randomize the first disk picked in the round-robin selection
@@ -334,7 +334,7 @@ public class NonLocalDirAllocator {
      *  If size is not known, use roulette selection -- pick directories
      *  with probability proportional to their available space.
      */
-    public Path getLocalPathForWrite(String pathStr, long size,
+    public Path getPathForWrite(String pathStr, long size,
         Configuration conf, boolean checkWrite) throws IOException {
 
       // history is built up and logged at error if the alloc
@@ -343,7 +343,7 @@ public class NonLocalDirAllocator {
       note(history, "Searching for a directory for file \"%s\", size = %,d; checkWrite=%s",
           pathStr, size, checkWrite);
       Context ctx = confChanged(conf);
-      int numDirs = ctx.localDirs.length;
+      int numDirs = ctx.dirs.length;
       int numDirsSearched = 0;
       // Max capacity in any directory
       long maxCapacity = 0;
@@ -356,7 +356,7 @@ public class NonLocalDirAllocator {
       }
       Path returnPath = null;
 
-      final int dirCount = ctx.localDirs.length;
+      final int dirCount = ctx.dirs.length;
       long[] availableOnDisk = new long[dirCount];
       long totalAvailable = 0;
 
@@ -364,7 +364,7 @@ public class NonLocalDirAllocator {
 
       //build the "roulette wheel"
       for (int i =0; i < dirCount; ++i) {
-        final Path target = ctx.localDirs[i];
+        final Path target = ctx.dirs[i];
         // attempt to recreate the dir so that getAvailable() is valid
         // if it fails, getAvailable() will return 0, so the dir will
         // be declared unavailable.
@@ -423,7 +423,7 @@ public class NonLocalDirAllocator {
             dir++;
           }
           ctx.dirNumLastAccessed.set(dir);
-          final Path localDir = ctx.localDirs[dir];
+          final Path localDir = ctx.dirs[dir];
           returnPath = createPath(localDir, pathStr, checkWrite);
           if (returnPath == null) {
             totalAvailable -= availableOnDisk[dir];
@@ -451,7 +451,7 @@ public class NonLocalDirAllocator {
             maxCapacity = capacity;
           }
           if (capacity > size) {
-            final Path localDir = ctx.localDirs[dirNum];
+            final Path localDir = ctx.dirs[dirNum];
             try {
               returnPath = createPath(localDir, pathStr, checkWrite);
             } catch (IOException e) {
@@ -494,19 +494,13 @@ public class NonLocalDirAllocator {
       throw new DiskErrorException(newErrorText, diskException);
     }
 
-    /** Creates a file on the local FS. Pass size as
-     * {@link LocalDirAllocator.SIZE_UNKNOWN} if not known apriori. We
-     *  round-robin over the set of disks (via the configured dirs) and return
-     *  a file on the first path which has enough space. The file is guaranteed
-     *  to go away when the JVM exits.
-     */
     public File createTmpFileForWrite(String pathStr, long size,
         Configuration conf) throws IOException {
 
       Context ctx = confChanged(conf); // JTA
 
       // find an appropriate directory
-      Path path = getLocalPathForWrite(pathStr, size, conf, true);
+      Path path = getPathForWrite(pathStr, size, conf, true);
       File dir = new File(path.getParent().toUri().getPath());
       String prefix = path.getName();
 
@@ -521,10 +515,10 @@ public class NonLocalDirAllocator {
      *  configured dirs for the file's existence and return the complete
      *  path to the file when we find one
      */
-    public Path getLocalPathToRead(String pathStr,
+    public Path getPathToRead(String pathStr,
         Configuration conf) throws IOException {
       Context ctx = confChanged(conf);
-      int numDirs = ctx.localDirs.length;
+      int numDirs = ctx.dirs.length;
       int numDirsSearched = 0;
       //remove the leading slash from the path (to make sure that the uri
       //resolution results in a valid path on the dir being checked)
@@ -532,7 +526,7 @@ public class NonLocalDirAllocator {
         pathStr = pathStr.substring(1);
       }
       while (numDirsSearched < numDirs) {
-        Path file = new Path(ctx.localDirs[numDirsSearched], pathStr);
+        Path file = new Path(ctx.dirs[numDirsSearched], pathStr);
         if (ctx.defaultFS.exists(file)) {
           return file;
         }
@@ -612,7 +606,7 @@ public class NonLocalDirAllocator {
       if (pathStr.startsWith("/")) {
         pathStr = pathStr.substring(1);
       }
-      return new PathIterator(ctx.defaultFS, pathStr, ctx.localDirs);
+      return new PathIterator(ctx.defaultFS, pathStr, ctx.dirs);
     }
 
     /** We search through all the configured dirs for the file's existence
@@ -621,7 +615,7 @@ public class NonLocalDirAllocator {
     public boolean ifExists(String pathStr, Configuration conf) {
       Context ctx = currentContext.get();
       try {
-        int numDirs = ctx.localDirs.length;
+        int numDirs = ctx.dirs.length;
         int numDirsSearched = 0;
         //remove the leading slash from the path (to make sure that the uri
         //resolution results in a valid path on the dir being checked)
@@ -629,7 +623,7 @@ public class NonLocalDirAllocator {
           pathStr = pathStr.substring(1);
         }
         while (numDirsSearched < numDirs) {
-          Path file = new Path(ctx.localDirs[numDirsSearched], pathStr);
+          Path file = new Path(ctx.dirs[numDirsSearched], pathStr);
           if (ctx.defaultFS.exists(file)) {
             return true;
           }

@@ -24,7 +24,7 @@ import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.LocalDirAllocator;
-import org.apache.hadoop.fs.NonLocalDirAllocator;
+import org.apache.hadoop.fs.DistributedDirAllocator;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapreduce.MRConfig;
 import org.apache.hadoop.mapreduce.MRJobConfig;
@@ -42,8 +42,8 @@ public class MROutputFiles extends MapOutputFile {
 
   private LocalDirAllocator lDirAlloc =
     new LocalDirAllocator(MRConfig.LOCAL_DIR);
-  private NonLocalDirAllocator nLDirAlloc =
-    new NonLocalDirAllocator(MRConfig.LOCAL_DIR); // JTA
+  private DistributedDirAllocator distDirAlloc =
+    new DistributedDirAllocator(MRConfig.LOCAL_DIR); // JTA
 
   public MROutputFiles() {
   }
@@ -57,7 +57,7 @@ public class MROutputFiles extends MapOutputFile {
   @Override
   public Path getOutputFile()
       throws IOException {
-    return nLDirAlloc.getLocalPathToRead(MRJobConfig.OUTPUT + Path.SEPARATOR
+    return distDirAlloc.getLocalPathToRead(MRJobConfig.OUTPUT + Path.SEPARATOR
         + MAP_OUTPUT_FILENAME_STRING, getConf()); // JTA
   }
 
@@ -71,7 +71,7 @@ public class MROutputFiles extends MapOutputFile {
   @Override
   public Path getOutputFileForWrite(long size)
       throws IOException {
-    return nLDirAlloc.getLocalPathForWrite(MRJobConfig.OUTPUT + Path.SEPARATOR
+    return distDirAlloc.getPathForWrite(MRJobConfig.OUTPUT + Path.SEPARATOR
         + MAP_OUTPUT_FILENAME_STRING, size, getConf()); // JTA
   }
 
@@ -92,7 +92,7 @@ public class MROutputFiles extends MapOutputFile {
   @Override
   public Path getOutputIndexFile()
       throws IOException {
-    return nLDirAlloc.getLocalPathToRead(MRJobConfig.OUTPUT + Path.SEPARATOR
+    return distDirAlloc.getPathToRead(MRJobConfig.OUTPUT + Path.SEPARATOR
         + MAP_OUTPUT_FILENAME_STRING + MAP_OUTPUT_INDEX_SUFFIX_STRING,
         getConf()); // JTA
   }
@@ -107,7 +107,7 @@ public class MROutputFiles extends MapOutputFile {
   @Override
   public Path getOutputIndexFileForWrite(long size)
       throws IOException {
-    return nLDirAlloc.getLocalPathForWrite(MRJobConfig.OUTPUT + Path.SEPARATOR
+    return distDirAlloc.getPathForWrite(MRJobConfig.OUTPUT + Path.SEPARATOR
         + MAP_OUTPUT_FILENAME_STRING + MAP_OUTPUT_INDEX_SUFFIX_STRING,
         size, getConf()); // JTA
   }
@@ -189,7 +189,7 @@ public class MROutputFiles extends MapOutputFile {
   @Override
   public Path getInputFile(int mapId)
       throws IOException {
-    return nLDirAlloc.getLocalPathToRead(String.format(
+    return distDirAlloc.getPathToRead(String.format(
         REDUCE_INPUT_FILE_FORMAT_STRING, MRJobConfig.OUTPUT, Integer
             .valueOf(mapId)), getConf()); // JTA
   }
@@ -206,7 +206,7 @@ public class MROutputFiles extends MapOutputFile {
   public Path getInputFileForWrite(org.apache.hadoop.mapreduce.TaskID mapId,
                                    long size)
       throws IOException {
-    return nLDirAlloc.getLocalPathForWrite(String.format(
+    return distDirAlloc.getPathForWrite(String.format(
         REDUCE_INPUT_FILE_FORMAT_STRING, MRJobConfig.OUTPUT, mapId.getId()),
         size, getConf()); // JTA
   }

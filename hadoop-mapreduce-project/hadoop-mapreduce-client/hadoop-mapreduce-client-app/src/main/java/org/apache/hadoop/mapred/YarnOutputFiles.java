@@ -24,7 +24,7 @@ import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.LocalDirAllocator;
-import org.apache.hadoop.fs.NonLocalDirAllocator;
+import org.apache.hadoop.fs.DistributedDirAllocator;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapreduce.JobContext;
 import org.apache.hadoop.mapreduce.MRConfig;
@@ -53,8 +53,8 @@ public class YarnOutputFiles extends MapOutputFile {
   // assume configured to $localdir/usercache/$user/appcache/$appId
   private LocalDirAllocator lDirAlloc =
     new LocalDirAllocator(MRConfig.LOCAL_DIR);
-  private NonLocalDirAllocator nLDirAlloc =
-    new NonLocalDirAllocator(MRConfig.LOCAL_DIR); // JTA
+  private DistributedDirAllocator distDirAlloc =
+    new DistributedDirAllocator(MRConfig.LOCAL_DIR); // JTA
 
   private Path getAttemptOutputDir() {
     return new Path(JOB_OUTPUT_DIR, conf.get(JobContext.TASK_ATTEMPT_ID));
@@ -69,7 +69,7 @@ public class YarnOutputFiles extends MapOutputFile {
   public Path getOutputFile() throws IOException {
     Path attemptOutput =
       new Path(getAttemptOutputDir(), MAP_OUTPUT_FILENAME_STRING);
-    return nLDirAlloc.getLocalPathToRead(attemptOutput.toString(), conf); // JTA
+    return distDirAlloc.getPathToRead(attemptOutput.toString(), conf); // JTA
   }
 
   /**
@@ -82,7 +82,7 @@ public class YarnOutputFiles extends MapOutputFile {
   public Path getOutputFileForWrite(long size) throws IOException {
     Path attemptOutput =
       new Path(getAttemptOutputDir(), MAP_OUTPUT_FILENAME_STRING);
-    return nLDirAlloc.getLocalPathForWrite(attemptOutput.toString(), size, conf); // JTA
+    return distDirAlloc.getPathForWrite(attemptOutput.toString(), size, conf); // JTA
   }
 
   /**
@@ -105,7 +105,7 @@ public class YarnOutputFiles extends MapOutputFile {
     Path attemptIndexOutput =
       new Path(getAttemptOutputDir(), MAP_OUTPUT_FILENAME_STRING +
                                       MAP_OUTPUT_INDEX_SUFFIX_STRING);
-    return nLDirAlloc.getLocalPathToRead(attemptIndexOutput.toString(), conf); // JTA
+    return distDirAlloc.getPathToRead(attemptIndexOutput.toString(), conf); // JTA
   }
 
   /**
@@ -119,7 +119,7 @@ public class YarnOutputFiles extends MapOutputFile {
     Path attemptIndexOutput =
       new Path(getAttemptOutputDir(), MAP_OUTPUT_FILENAME_STRING +
                                       MAP_OUTPUT_INDEX_SUFFIX_STRING);
-    return nLDirAlloc.getLocalPathForWrite(attemptIndexOutput.toString(),
+    return distDirAlloc.getPathForWrite(attemptIndexOutput.toString(),
         size, conf); // JTA
   }
 
@@ -211,7 +211,7 @@ public class YarnOutputFiles extends MapOutputFile {
    */
   public Path getInputFileForWrite(org.apache.hadoop.mapreduce.TaskID mapId,
       long size) throws IOException {
-    return nLDirAlloc.getLocalPathForWrite(String.format(
+    return distDirAlloc.getPathForWrite(String.format(
         REDUCE_INPUT_FILE_FORMAT_STRING,
         getAttemptOutputDir().toString(), mapId.getId()),
         size, conf); // JTA
