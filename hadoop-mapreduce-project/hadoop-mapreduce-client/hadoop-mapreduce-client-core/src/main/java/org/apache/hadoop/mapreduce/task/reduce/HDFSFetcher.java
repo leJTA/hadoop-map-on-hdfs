@@ -16,7 +16,6 @@ import javax.crypto.SecretKey;
 import org.apache.hadoop.classification.VisibleForTesting;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FSDataInputStream;
-import org.apache.hadoop.fs.NonLocalDirAllocator;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.mapred.Counters;
@@ -47,14 +46,14 @@ public class HDFSFetcher<K, V> extends Fetcher<K, V> {
   private static TaskAttemptID[] EMPTY_ATTEMPT_ID_ARRAY = new TaskAttemptID[0];
 
   // assume configured to $localdir/usercache/$user/appcache/$appId
-  // private NonLocalDirAllocator nLDirAlloc = new NonLocalDirAllocator(MRConfig.LOCAL_DIR);
+  // private DistributedDirAllocator distDirAlloc = new DistributedDirAllocator(MRConfig.LOCAL_DIR);
   private JobConf job;
   private final boolean fetchRetryEnabled;
 
   @VisibleForTesting
   HDFSFetcher(JobConf job, TaskAttemptID reduceId, ShuffleSchedulerImpl<K, V> scheduler, MergeManager<K, V> merger,
               Reporter reporter, ShuffleClientMetrics metrics, ExceptionReporter exceptionReporter,
-              SecretKey shuffleKey, int id) {
+              SecretKey shuffleKey) {
     super(job, reduceId, scheduler, merger, reporter, metrics, exceptionReporter, shuffleKey);
     this.job = job;
 
@@ -70,9 +69,8 @@ public class HDFSFetcher<K, V> extends Fetcher<K, V> {
   }
 
   @VisibleForTesting
+  @Override
   protected void copyFromHost(MapHost host) throws IOException {
-    // reset retryStartTime for a new host
-    retryStartTime = 0;
     // Get completed maps on 'host'
     List<TaskAttemptID> maps = scheduler.getMapsForHost(host);
 
@@ -129,52 +127,29 @@ public class HDFSFetcher<K, V> extends Fetcher<K, V> {
     Path mapOutputFileName = getMapOutputPath(remaining.iterator().next());
     Path indexFileName = mapOutputFileName.suffix(".index");
 
-    // Read its index to determine the location of our split
-    // and its size.
-    SpillRecord sr = new SpillRecord(indexFileName, job);
-    IndexRecord ir = sr.getIndex(reduce);
+    long decompressedLength = -1;
+    long compressedLength = -1;
 
-    long compressedLength = ir.partLength;
-    long decompressedLength = ir.rawLength;
-
-    compressedLength -= CryptoUtils.cryptoPadding(job);
-    decompressedLength -= CryptoUtils.cryptoPadding(job);
 
     try {
       long startTime = Time.monotonicNow();
-      int forReduce = -1;
 
-      FileSystem defaultFS = null;
-      FSDataInputStream inStream = null;
-      try {
-        defaultFS = FileSystem.get(job);
-        inStream = defaultFS.open(mapOutputFileName);
-      } catch (IOException e) {
-        badIdErrs.increment(1);
-        LOG.warn("Path error : ", mapOutputFileName.toString());
-        // Don't know which one was bad, so consider all of them as bad
-        return remaining.toArray(new TaskAttemptID[remaining.size()]);
-      }
-      try {
-        inStream.seek(ir.startOffset);
-        inStream = IntermediateEncryptedStream.wrapIfNecessary(job, inStream,
-                mapOutputFileName);
-        mapOutput.shuffle(host, inStream, compressedLength, decompressedLength, metrics, reporter);
-      } catch (java.lang.InternalError | Exception e) {
-        LOG.warn("Failed to shuffle for fetcher#"+id, e);
-        throw new IOException(e);
-      }
+      // Read its index to determine the location of our split
+      // and its size.
+      SpillRecord sr = new SpillRecord(indexFileName, job);
+      IndexRecord ir = sr.getIndex(reduce);
 
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("header: " + mapId + ", len: " + compressedLength + ", decomp len: " + decompressedLength);
-      }
+      compressedLength = ir.partLength;
+      decompressedLength = ir.rawLength;
+
+      compressedLength -= CryptoUtils.cryptoPadding(job);
+      decompressedLength -= CryptoUtils.cryptoPadding(job);
 
       // Get the location for the map output - either in-memory or on-disk
       try {
         mapOutput = merger.reserve(mapId, decompressedLength, id);
       } catch (IOException ioe) {
         // kill this reduce attempt
-        ioErrs.increment(1);
         scheduler.reportLocalError(ioe);
         return EMPTY_ATTEMPT_ID_ARRAY;
       }
@@ -184,6 +159,30 @@ public class HDFSFetcher<K, V> extends Fetcher<K, V> {
         LOG.info("hdfs-fetcher#" + id + " - MergeManager returned status WAIT ...");
         // Not an error but wait to process data.
         return EMPTY_ATTEMPT_ID_ARRAY;
+      }
+      FileSystem defaultFS = null;
+      FSDataInputStream inStream = null;
+      try {
+        defaultFS = FileSystem.get(job);
+        inStream = defaultFS.open(mapOutputFileName);
+      } catch (IOException e) {
+        LOG.warn("Path error : ", mapOutputFileName.toString());
+        // Don't know which one was bad, so consider all of them as bad
+        return remaining.toArray(new TaskAttemptID[remaining.size()]);
+      }
+
+      try {
+        inStream.seek(ir.startOffset);
+        inStream = IntermediateEncryptedStream.wrapIfNecessary(job, inStream,
+                mapOutputFileName);
+        mapOutput.shuffle(host, inStream, compressedLength, decompressedLength, metrics, reporter);
+      } catch (java.lang.InternalError | Exception e) {
+        LOG.warn("Failed to shuffle for hdfs-fetcher#"+id, e);
+        throw new IOException(e);
+      }
+
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("header: " + mapId + ", len: " + compressedLength + ", decomp len: " + decompressedLength);
       }
 
       // The codec for lz0,lz4,snappy,bz2,etc. throw java.lang.InternalError
@@ -201,8 +200,6 @@ public class HDFSFetcher<K, V> extends Fetcher<K, V> {
 
       // Inform the shuffle scheduler
       long endTime = Time.monotonicNow();
-      // Reset retryStartTime as map task make progress if retried before.
-      retryStartTime = 0;
 
       scheduler.copySucceeded(mapId, host, compressedLength, startTime, endTime, mapOutput);
       // Note successful shuffle
@@ -214,15 +211,9 @@ public class HDFSFetcher<K, V> extends Fetcher<K, V> {
         mapOutput.abort();
       }
 
-      if (canRetry) {
-        checkTimeoutOrRetry(host, ioe);
-      }
-
-      ioErrs.increment(1);
       if (mapId == null || mapOutput == null) {
         LOG.warn("hdfs-fetcher#" + id + " failed to read map header" + mapId + " decomp: " + decompressedLength + ", " +
-                     compressedLength,
-                 ioe);
+                     compressedLength, ioe);
         if (mapId == null) {
           return remaining.toArray(new TaskAttemptID[remaining.size()]);
         } else {
@@ -230,7 +221,7 @@ public class HDFSFetcher<K, V> extends Fetcher<K, V> {
         }
       }
 
-      LOG.warn("Failed to shuffle output of " + mapId + " from " + host.getHostName(), ioe);
+      LOG.warn("Failed to shuffle output of " + mapId + " from HDFS : map host = " + host.getHostName(), ioe);
 
       // Inform the shuffle-scheduler
       metrics.failedFetch();
