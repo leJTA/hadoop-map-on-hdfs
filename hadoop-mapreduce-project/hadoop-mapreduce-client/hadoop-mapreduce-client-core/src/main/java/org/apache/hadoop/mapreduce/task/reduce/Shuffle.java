@@ -43,7 +43,7 @@ public class Shuffle<K, V> implements ShuffleConsumerPlugin<K, V>,
   private static final int MAX_EVENTS_TO_FETCH = 10000;
   private static final int MIN_EVENTS_TO_FETCH = 100;
   private static final int MAX_RPC_OUTSTANDING_EVENTS = 3000000;
-  
+
   private ShuffleConsumerPlugin.Context context;
 
   private TaskAttemptID reduceId;
@@ -51,7 +51,7 @@ public class Shuffle<K, V> implements ShuffleConsumerPlugin<K, V>,
   private Reporter reporter;
   private ShuffleClientMetrics metrics;
   private TaskUmbilicalProtocol umbilical;
-  
+
   private ShuffleSchedulerImpl<K, V> scheduler;
   private MergeManager<K, V> merger;
   private Throwable throwable = null;
@@ -75,7 +75,7 @@ public class Shuffle<K, V> implements ShuffleConsumerPlugin<K, V>,
     this.taskStatus = context.getStatus();
     this.reduceTask = context.getReduceTask();
     this.localMapFiles = context.getLocalMapFiles();
-    
+
     scheduler = new ShuffleSchedulerImpl<K, V>(jobConf, taskStatus, reduceId,
         this, copyPhase, context.getShuffledMapsCounter(),
         context.getReduceShuffleBytes(), context.getFailedShuffleCounter());
@@ -86,7 +86,7 @@ public class Shuffle<K, V> implements ShuffleConsumerPlugin<K, V>,
       ShuffleConsumerPlugin.Context context) {
     return new MergeManagerImpl<K, V>(reduceId, jobConf, context.getLocalFS(),
         context.getLocalDirAllocator(), reporter, context.getCodec(),
-        context.getCombinerClass(), context.getCombineCollector(), 
+        context.getCombinerClass(), context.getCombineCollector(),
         context.getSpilledRecordsCounter(),
         context.getReduceCombineInputCounter(),
         context.getMergedMapOutputsCounter(), this, context.getMergePhase(),
@@ -107,7 +107,7 @@ public class Shuffle<K, V> implements ShuffleConsumerPlugin<K, V>,
         new EventFetcher<K, V>(reduceId, umbilical, scheduler, this,
             maxEventsToFetch);
     eventFetcher.start();
-    
+
     // Start the map-output fetcher threads
     boolean isLocal = localMapFiles != null;
     final int numFetchers = isLocal ? 1 :
@@ -120,17 +120,20 @@ public class Shuffle<K, V> implements ShuffleConsumerPlugin<K, V>,
       fetchers[0].start();
     } else {
       for (int i=0; i < numFetchers; ++i) {
-        fetchers[i] = new Fetcher<K, V>(jobConf, reduceId, scheduler, merger,
-                                       reporter, metrics, this, 
-                                       reduceTask.getShuffleSecret());
+        // fetchers[i] = new Fetcher<K, V>(jobConf, reduceId, scheduler, merger,
+        //                                reporter, metrics, this,
+        //                                reduceTask.getShuffleSecret());
+        fetchers[i] = new HDFSFetcher<K, V>(jobConf, reduceId, scheduler, merger,
+                                       reporter, metrics, this,
+                                       reduceTask.getShuffleSecret()); // JTA
         fetchers[i].start();
       }
     }
-    
+
     // Wait for shuffle to complete successfully
     while (!scheduler.waitUntilDone(PROGRESS_FREQUENCY)) {
       reporter.progress();
-      
+
       synchronized (this) {
         if (throwable != null) {
           throw new ShuffleError("error in shuffle in " + throwingThreadName,
@@ -141,12 +144,12 @@ public class Shuffle<K, V> implements ShuffleConsumerPlugin<K, V>,
 
     // Stop the event-fetcher thread
     eventFetcher.shutDown();
-    
+
     // Stop the map-output fetcher threads
     for (Fetcher<K, V> fetcher : fetchers) {
       fetcher.shutDown();
     }
-    
+
     // stop the scheduler
     scheduler.close();
 
@@ -169,7 +172,7 @@ public class Shuffle<K, V> implements ShuffleConsumerPlugin<K, V>,
                                throwable);
       }
     }
-    
+
     return kvIter;
   }
 
@@ -181,14 +184,14 @@ public class Shuffle<K, V> implements ShuffleConsumerPlugin<K, V>,
     if (throwable == null) {
       throwable = t;
       throwingThreadName = Thread.currentThread().getName();
-      // Notify the scheduler so that the reporting thread finds the 
+      // Notify the scheduler so that the reporting thread finds the
       // exception immediately.
       synchronized (scheduler) {
         scheduler.notifyAll();
       }
     }
   }
-  
+
   public static class ShuffleError extends IOException {
     private static final long serialVersionUID = 5753909320586607881L;
 
