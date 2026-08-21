@@ -122,10 +122,12 @@ public class HDFSFetcher<K, V> extends Fetcher<K, V> {
   private TaskAttemptID[] copyMapOutputFromHDFS(MapHost host, Set<TaskAttemptID> remaining,
                                         boolean canRetry) throws IOException {
     MapOutput<K, V> mapOutput = null;
-    TaskAttemptID mapId = null;
+    TaskAttemptID mapId = remaining.iterator().next();
 
-    Path mapOutputFileName = getMapOutputPath(remaining.iterator().next());
+    Path mapOutputFileName = getMapOutputPath(mapId);
     Path indexFileName = mapOutputFileName.suffix(".index");
+
+    LOG.warn("----------> Reading map output : " + mapOutputFileName.toString());
 
     long decompressedLength = -1;
     long compressedLength = -1;
@@ -160,22 +162,19 @@ public class HDFSFetcher<K, V> extends Fetcher<K, V> {
         // Not an error but wait to process data.
         return EMPTY_ATTEMPT_ID_ARRAY;
       }
-      FileSystem defaultFS = null;
+      FileSystem defaultFS = FileSystem.get(job);
       FSDataInputStream inStream = null;
       try {
-        defaultFS = FileSystem.get(job);
         inStream = defaultFS.open(mapOutputFileName);
       } catch (IOException e) {
-        LOG.warn("Path error : ", mapOutputFileName.toString());
+        LOG.warn("Error Opening : ", mapOutputFileName.toString());
         // Don't know which one was bad, so consider all of them as bad
         return remaining.toArray(new TaskAttemptID[remaining.size()]);
       }
 
       try {
         inStream.seek(ir.startOffset);
-        inStream = IntermediateEncryptedStream.wrapIfNecessary(job, inStream,
-                mapOutputFileName);
-        mapOutput.shuffle(host, inStream, compressedLength, decompressedLength, metrics, reporter);
+        inStream = IntermediateEncryptedStream.wrapIfNecessary(job, inStream, null);
       } catch (java.lang.InternalError | Exception e) {
         LOG.warn("Failed to shuffle for hdfs-fetcher#"+id, e);
         throw new IOException(e);
