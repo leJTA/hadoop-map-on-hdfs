@@ -33,7 +33,7 @@ import org.apache.hadoop.mapred.IndexRecord;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.MapOutputFile;
 import org.apache.hadoop.mapred.Reporter;
-import org.apache.hadoop.mapred.SpillRecord;
+import org.apache.hadoop.mapred.DistributedSpillRecord;
 import org.apache.hadoop.mapreduce.TaskAttemptID;
 import org.apache.hadoop.mapreduce.CryptoUtils;
 import org.apache.hadoop.mapreduce.security.IntermediateEncryptedStream;
@@ -124,8 +124,8 @@ class LocalFetcher<K,V> extends Fetcher<K, V> {
 
     // Read its index to determine the location of our split
     // and its size.
-    SpillRecord sr = new SpillRecord(indexFileName, job);
-    IndexRecord ir = sr.getIndex(reduce);
+    DistributedSpillRecord dsr = new DistributedSpillRecord(indexFileName, job);
+    IndexRecord ir = dsr.getIndex(reduce);
 
     long compressedLength = ir.partLength;
     long decompressedLength = ir.rawLength;
