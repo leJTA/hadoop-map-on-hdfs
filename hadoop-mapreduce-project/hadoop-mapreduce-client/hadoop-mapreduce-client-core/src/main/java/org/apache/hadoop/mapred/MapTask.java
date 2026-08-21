@@ -1914,7 +1914,7 @@ public class MapTask extends Task {
       if (numSpills == 0) {
         //create dummy files
         IndexRecord rec = new IndexRecord();
-        SpillRecord sr = new SpillRecord(partitions);
+        DistributedSpillRecord dsr = new DistributedSpillRecord(partitions);
         try {
           for (int i = 0; i < partitions; i++) {
             long segmentStart = finalOut.getPos();
@@ -1931,9 +1931,9 @@ public class MapTask extends Task {
             rec.startOffset = segmentStart;
             rec.rawLength = writer.getRawLength() + CryptoUtils.cryptoPadding(job);
             rec.partLength = writer.getCompressedLength() + CryptoUtils.cryptoPadding(job);
-            sr.putIndex(rec, i);
+            dsr.putIndex(rec, i);
           }
-          sr.writeToFile(finalIndexFile, job);
+          dsr.writeToFile(finalIndexFile, job);
         } finally {
           finalOut.close();
           if (finalPartitionOut != null) {
@@ -1947,7 +1947,7 @@ public class MapTask extends Task {
         sortPhase.addPhases(partitions); // Divide sort phase into sub-phases
 
         IndexRecord rec = new IndexRecord();
-        final SpillRecord spillRec = new SpillRecord(partitions);
+        final DistributedSpillRecord dSpillRec = new DistributedSpillRecord(partitions);
         for (int parts = 0; parts < partitions; parts++) {
           //create the segments to be merged
           List<Segment<K,V>> segmentList =
@@ -2008,9 +2008,9 @@ public class MapTask extends Task {
           rec.startOffset = segmentStart;
           rec.rawLength = writer.getRawLength() + CryptoUtils.cryptoPadding(job);
           rec.partLength = writer.getCompressedLength() + CryptoUtils.cryptoPadding(job);
-          spillRec.putIndex(rec, parts);
+          dSpillRec.putIndex(rec, parts);
         }
-        spillRec.writeToFile(finalIndexFile, job);
+        dSpillRec.writeToFile(finalIndexFile, job);
         finalOut.close();
         if (finalPartitionOut != null) {
           finalPartitionOut.close();
